@@ -17,6 +17,8 @@ let rooms = ['general'];
 const roomCreators = { general: 'System' };
 const userDMs = {};
 const roomMessages = {};
+const typingUsers = {}; // Track who is typing to whom in DMs
+const unreadCounts = {}; // Track unread message counts {userA: {userB: count}}
 
 function getUsersInRoom(room) {
   return users.filter(u => u.currentRoom === room);
@@ -52,17 +54,59 @@ function saveRoomMessage(room, message) {
   roomMessages[room].push(message);
 }
 
+// Get unread count for a user from another user
+function getUnreadCount(forUser, fromUser) {
+  return unreadCounts[forUser]?.[fromUser] || 0;
+}
+
+// Increment unread count
+function incrementUnreadCount(forUser, fromUser) {
+  if (!unreadCounts[forUser]) unreadCounts[forUser] = {};
+  unreadCounts[forUser][fromUser] = (unreadCounts[forUser][fromUser] || 0) + 1;
+}
+
+// Clear unread count when user opens DM
+function clearUnreadCount(forUser, fromUser) {
+  if (unreadCounts[forUser] && unreadCounts[forUser][fromUser]) {
+    unreadCounts[forUser][fromUser] = 0;
+  }
+}
+
+// Check if user is typing to another user in DM
+function isTypingInDM(fromUser, toUser) {
+  return typingUsers[fromUser] === toUser;
+}
+
+// Set typing status for DM
+function setTypingInDM(fromUser, toUser) {
+  typingUsers[fromUser] = toUser;
+}
+
+// Clear typing status for DM
+function clearTypingInDM(fromUser) {
+  delete typingUsers[fromUser];
+}
+
 // Cleanup when no one is left in a room
 function cleanupRoomMessages(room) {
   const usersInRoom = getUsersInRoom(room);
   if (usersInRoom.length === 0) {
-    delete roomMessages[room]; // Remove messages for the room
+    delete roomMessages[room];
   }
+}
+
+function isPublicRoom(room) {
+  return !room.startsWith('pm:');
 }
 
 io.on('connection', socket => {
   // Join "general" by default
   socket.join('general');
+
+  socket.on('getRoomMessages', (room, cb) => {
+    const messages = getRoomMessages(room) || [];
+    cb && cb(messages);
+  });
 
   socket.on('newUser', ({ userName }, cb) => {
     const taken = users.some(u => u.userName === userName);
@@ -74,13 +118,22 @@ io.on('connection', socket => {
 
     // Emit full users list to all clients (with currentRoom info)
     io.emit('allUsers', getAllUsers());
+    
+    // Send user states (typing and unread counts)
+    socket.emit('userStates', {
+      typingUsers,
+      unreadCounts: unreadCounts[userName] || {}
+    });
 
-    io.to('general').emit('roomUsers', getUsersInRoom('general'));
     io.emit('roomsList', rooms.map(room => ({
       name: room,
       creator: roomCreators[room] || 'Unknown'
     })));
-    io.to('general').emit('notification', `${userName} joined the general room`);
+    
+    if (isPublicRoom('general')) {
+      io.to('general').emit('notification', `${userName} joined the general room`);
+    }
+    
     cb({ success: true, room: 'general' });
   });
 
@@ -114,14 +167,14 @@ io.on('connection', socket => {
     const previousMessages = getRoomMessages(newRoom) || [];
     socket.emit('roomMessages', previousMessages);
 
-    io.to(oldRoom).emit('roomUsers', getUsersInRoom(oldRoom));
-    io.to(newRoom).emit('roomUsers', getUsersInRoom(newRoom));
+    // Send notifications only for public rooms
+    if (isPublicRoom(oldRoom)) {
+      io.to(oldRoom).emit('notification', `${user.userName} left the room`);
+    }
+    if (isPublicRoom(newRoom)) {
+      io.to(newRoom).emit('notification', `${user.userName} joined the room`);
+    }
 
-    // Send notifications to both rooms
-    io.to(oldRoom).emit('notification', `${user.userName} left the room`);
-    io.to(newRoom).emit('notification', `${user.userName} joined the room`);
-
-    // Callback to notify the client that the room change was successful
     cb && cb({ success: true, room: newRoom });
   });
 
@@ -157,6 +210,20 @@ io.on('connection', socket => {
     if (!userDMs[recipient].conversations[sender.userName]) userDMs[recipient].conversations[sender.userName] = [];
     userDMs[recipient].conversations[sender.userName].push(msg);
 
+    // Increment unread count for recipient (only if they're not currently in this DM)
+    const recipientUser = users.find(u => u.userName === recipient);
+    if (recipientUser && recipientUser.currentRoom !== pmRoom) {
+      incrementUnreadCount(recipient, sender.userName);
+      
+      // Send updated unread count to recipient
+      if (recipientSocketID) {
+        io.to(recipientSocketID).emit('unreadCountUpdate', {
+          fromUser: sender.userName,
+          count: getUnreadCount(recipient, sender.userName)
+        });
+      }
+    }
+
     // Emit message to both via room
     io.to(pmRoom).emit('privateMessage', msg);
     cb && cb({ success: true });
@@ -165,15 +232,24 @@ io.on('connection', socket => {
   socket.on('getPrivateMessages', ({ withUser }, cb) => {
     const user = users.find(u => u.socketID === socket.id);
     if (!user) return;
+    
+    // Clear unread count when opening DM
+    clearUnreadCount(user.userName, withUser);
+    
+    // Notify client to update unread count
+    socket.emit('unreadCountUpdate', {
+      fromUser: withUser,
+      count: 0
+    });
+    
     const convos = userDMs[user.userName]?.conversations || {};
     const messages = convos[withUser] || [];
     cb && cb(messages);
   });
 
-
   socket.on('chatMessage', ({ room, message }) => {
     const user = users.find(u => u.socketID === socket.id);
-    if (!user || user.currentRoom !== room) return; // Validate user room
+    if (!user || user.currentRoom !== room) return;
     const msg = {
       userName: user.userName,
       text: message.trim(),
@@ -198,24 +274,49 @@ io.on('connection', socket => {
   socket.on('typingPrivate', ({ recipient }) => {
     const sender = users.find(u => u.socketID === socket.id);
     if (!sender) return;
-    const pmRoom = getPrivateRoom(sender.userName, recipient);
-    socket.to(pmRoom).emit('typing', sender.userName);
+    
+    setTypingInDM(sender.userName, recipient);
+    
+    // Notify the recipient that sender is typing to them
+    const recipientSocketID = getSocketIdByUsername(recipient);
+    if (recipientSocketID) {
+      io.to(recipientSocketID).emit('dmTypingUpdate', {
+        fromUser: sender.userName,
+        isTyping: true
+      });
+    }
   });
 
   socket.on('stopTypingPrivate', ({ recipient }) => {
     const sender = users.find(u => u.socketID === socket.id);
     if (!sender) return;
-    const pmRoom = getPrivateRoom(sender.userName, recipient);
-    socket.to(pmRoom).emit('stopTyping', sender.userName);
+    
+    clearTypingInDM(sender.userName);
+    
+    // Notify the recipient that sender stopped typing
+    const recipientSocketID = getSocketIdByUsername(recipient);
+    if (recipientSocketID) {
+      io.to(recipientSocketID).emit('dmTypingUpdate', {
+        fromUser: sender.userName,
+        isTyping: false
+      });
+    }
   });
 
   socket.on('disconnect', () => {
     const user = users.find(u => u.socketID === socket.id);
     if (user) {
+      // Clear typing status on disconnect
+      clearTypingInDM(user.userName);
+      
       users = users.filter(u => u.socketID !== socket.id);
-      io.to(user.currentRoom).emit('notification', `${user.userName} left the room`);
+      
+      // Send notifications only for public rooms
+      if (isPublicRoom(user.currentRoom)) {
+        io.to(user.currentRoom).emit('notification', `${user.userName} left the room`);
+      }
+      
       io.emit('allUsers', getAllUsers());
-      io.to(user.currentRoom).emit('roomUsers', getUsersInRoom(user.currentRoom));
       cleanupRoomMessages(user.currentRoom);
     }
   });
@@ -230,7 +331,6 @@ const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
-
 
 // import { networkInterfaces } from 'os';
 // function getLocalIP() {
