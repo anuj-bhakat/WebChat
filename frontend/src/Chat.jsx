@@ -258,20 +258,22 @@ function Chat() {
         <h2 className="text-2xl font-semibold mb-6 text-indigo-700 border-b border-indigo-300 pb-3 select-none text-center sm:text-left">
           Rooms
         </h2>
-        <ul className="space-y-4 overflow-y-auto max-h-[22rem] scrollbar-thin scrollbar-thumb-indigo-500 scrollbar-track-indigo-100 text-sm font-medium text-indigo-900">
+        <ul className="space-y-3 overflow-y-auto max-h-[22rem] scrollbar-thin scrollbar-thumb-indigo-500 scrollbar-track-indigo-100 text-sm font-medium text-indigo-900">
           {rooms.map(room => (
             <li
               key={room.name}
               onClick={() => handleRoomChange(room.name)}
-              className={`flex items-center gap-3 py-3 px-4 rounded-xl cursor-pointer transition-all duration-300 ease-in-out select-none 
-                ${room.name === currentRoom && !privateRecipient ? 'bg-indigo-600 text-white shadow-lg' : 'hover:bg-indigo-100'}`}
+              className={`flex items-center gap-3 py-2 px-4 rounded-xl cursor-pointer transition-colors select-none
+                ${room.name === currentRoom && !privateRecipient ? 'bg-indigo-600 text-white shadow-lg' : 'hover:bg-indigo-100'}
+              `}
               title={`Created by ${room.creator}`}
             >
-              <div className={`flex justify-center items-center w-9 h-9 rounded-full font-bold 
-                ${room.name === currentRoom && !privateRecipient ? 'bg-indigo-800' : 'bg-indigo-200 text-indigo-700'}`}>
-                {room.name.charAt(0).toUpperCase()}
+              <div className={`flex justify-center items-center w-8 h-8 rounded-full font-bold uppercase shadow 
+                ${room.name === currentRoom && !privateRecipient ? 'bg-indigo-800 text-white' : 'bg-indigo-200 text-indigo-700'}
+              `}>
+                {room.name.charAt(0)}
               </div>
-              <span className="truncate">{room.name}</span>
+              <span className="truncate max-w-[120px]" title={room.name}>{room.name}</span>
             </li>
           ))}
         </ul>
@@ -313,10 +315,13 @@ function Chat() {
                 title={`Direct message with ${u.userName}`}
               >
                 {/* User Avatar */}
-                <div className={`flex justify-center items-center w-8 h-8 rounded-full bg-indigo-300 text-indigo-900 font-semibold uppercase select-text text-sm relative
+                <div className={`relative flex justify-center items-center w-8 h-8 rounded-full bg-indigo-300 text-indigo-900 font-semibold uppercase select-text text-sm
                   ${u.userName === username ? 'border-2 border-indigo-600 shadow-lg' : 'hover:scale-105 transition-transform'}`}>
                   {u.userName.charAt(0)}
-                  
+                  {/* Online indicator for other users */}
+                  {u.currentRoom === currentRoom && u.userName !== username && (
+                    <span className="absolute -bottom-1 -right-1 block w-3 h-3 bg-green-500 rounded-full ring-2 ring-white shadow-lg"></span>
+                  )}
                   {/* Unread count badge */}
                   {unreadCount > 0 && u.userName !== username && (
                     <div className="absolute -top-2 -right-2 bg-red-500 text-white text-xs rounded-full min-w-[20px] h-5 flex items-center justify-center font-bold shadow-lg">
@@ -329,7 +334,7 @@ function Chat() {
                 <div className="flex flex-grow justify-between items-center gap-2">
                   <div className="flex flex-col flex-grow">
                     {/* Username with status */}
-                    <span className={`font-semibold truncate select-text text-sm ${u.userName === username ? 'text-indigo-800' : 'text-indigo-700'}`}>
+                    <span className={`font-semibold truncate max-w-[120px] select-text text-sm ${u.userName === username ? 'text-indigo-800' : 'text-indigo-700'}`} title={u.userName}>
                       {u.userName}
                       {/* Typing indicator */}
                       {isTypingToMe && u.userName !== username && (
@@ -340,9 +345,6 @@ function Chat() {
                     {/* Active in Chat Status */}
                     {u.currentRoom === currentRoom && u.userName !== username && (
                       <span className="text-xs text-green-500 flex items-center gap-1 mt-1">
-                        <svg className="w-3 h-3 text-green-500" fill="currentColor" viewBox="0 0 20 20">
-                          <circle cx="10" cy="10" r="4" />
-                        </svg>
                         Active in Chat
                       </span>
                     )}
@@ -429,28 +431,41 @@ function Chat() {
                   className={`w-full flex ${isOwn ? 'justify-end' : 'justify-start'} transition-opacity duration-300 ease-in-out`}
                   aria-live="polite"
                 >
-                  <div
-                    className={`relative rounded-2xl px-6 py-4 shadow-md
-                      ${isOwn
-                        ? 'bg-indigo-600 text-white shadow-lg'
-                        : msg.private ? 'bg-pink-100 text-pink-800 border border-pink-200' : 'bg-white text-gray-900 border border-gray-300 hover:bg-indigo-50'}
-                      max-w-md break-words`}
-                    style={{ maxWidth: '400px' }}
-                  >
-                    <div className="flex items-center justify-between mb-1 text-xs font-semibold opacity-90 select-text">
-                      <span className={isOwn ? 'text-white truncate max-w-[75%]' : 'text-gray-800 truncate max-w-[75%]'}>
-                        {msg.userName}
-                        {msg.private && <span className="ml-2 text-xs font-bold text-pink-600">[DM]</span>}
-                      </span>
-                      <time
-                        dateTime={msg.time}
-                        className={isOwn ? 'text-indigo-200 ml-4 flex-shrink-0 select-text' : 'text-gray-500 ml-4 flex-shrink-0 select-text'}
-                        title={new Date(msg.time).toLocaleString()}
-                      >
-                        {msg.time}
-                      </time>
+                  <div className={`flex items-end gap-3 ${isOwn ? 'flex-row-reverse' : 'flex-row'}`}>
+                    {/* Avatar Circle */}
+                    <div
+                      className={`flex justify-center items-center w-10 h-10 rounded-full font-bold uppercase shadow 
+                        ${isOwn ? 'bg-indigo-700 text-white' : 'bg-indigo-200 text-indigo-800'}
+                      `}
+                    >
+                      {msg.userName ? msg.userName.charAt(0) : '?'}
                     </div>
-                    <div className="whitespace-pre-wrap">{msg.text}</div>
+                    {/* Message Bubble */}
+                    <div
+                      className={`relative rounded-2xl px-6 py-4 shadow-md
+                        ${isOwn
+                          ? 'bg-indigo-600 text-white shadow-lg'
+                          : msg.private
+                            ? 'bg-pink-100 text-pink-800 border border-pink-200'
+                            : 'bg-white text-gray-900 border border-gray-300 hover:bg-indigo-50'}
+                        max-w-md break-words`}
+                      style={{ maxWidth: '400px' }}
+                    >
+                      <div className="flex items-center justify-between mb-1 text-xs font-semibold opacity-90 select-text">
+                        <span className={isOwn ? 'text-white truncate max-w-[75%]' : 'text-gray-800 truncate max-w-[75%]'}>
+                          {msg.userName}
+                          {msg.private && <span className="ml-2 text-xs font-bold text-pink-600">[DM]</span>}
+                        </span>
+                        <time
+                          dateTime={msg.time}
+                          className={isOwn ? 'text-indigo-200 ml-4 flex-shrink-0 select-text' : 'text-gray-500 ml-4 flex-shrink-0 select-text'}
+                          title={new Date(msg.time).toLocaleString()}
+                        >
+                          {msg.time}
+                        </time>
+                      </div>
+                      <div className="whitespace-pre-wrap">{msg.text}</div>
+                    </div>
                   </div>
                 </div>
               );
@@ -459,15 +474,31 @@ function Chat() {
           </div>
         </main>
 
-        <div className="px-10 pb-4 min-h-[1.5rem] text-indigo-700 font-medium italic flex-shrink-0 select-none flex items-center gap-2">
+        <div
+          className={`
+            px-10 pb-4 min-h-[1.5rem] text-indigo-700 font-medium italic flex-shrink-0 select-none flex items-center gap-2
+            transition-all duration-300
+            ${typingUsers.length > 0 ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-2 pointer-events-none'}
+          `}
+        >
           {typingUsers.length > 0 && (
-            <span className="flex items-center gap-2 bg-indigo-100 px-4 py-2 rounded-full shadow-inner text-indigo-700 animate-pulse max-w-xs overflow-hidden whitespace-nowrap text-ellipsis">
-              <svg className="w-5 h-5 animate-bounce" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden="true">
-                <circle cx="5" cy="12" r="2" />
-                <circle cx="12" cy="12" r="2" />
-                <circle cx="19" cy="12" r="2" />
-              </svg>
-              {typingUsers.join(', ')} {typingUsers.length === 1 ? 'is' : 'are'} typing...
+            <span className="flex items-center gap-3 bg-indigo-100 px-5 py-2 rounded-full shadow-inner text-indigo-700 animate-pulse transition-all duration-300 max-w-xs whitespace-nowrap text-ellipsis">
+              <span>
+                {typingUsers.slice(0, 2).join(', ')}
+                {typingUsers.length === 1 && ' is typing'}
+                {typingUsers.length === 2 && ' are typing'}
+                {typingUsers.length > 2 && (
+                  <>
+                    {` and ${typingUsers.length - 2} other${typingUsers.length - 2 > 1 ? 's' : ''} are typing`}
+                  </>
+                )}
+              </span>
+              {/* Animated dots */}
+              <span className="flex gap-1 ml-1">
+                <span className="h-2 w-2 rounded-full bg-indigo-500 animate-bounce" style={{ animationDelay: '0s' }}></span>
+                <span className="h-2 w-2 rounded-full bg-indigo-500 animate-bounce" style={{ animationDelay: '0.16s' }}></span>
+                <span className="h-2 w-2 rounded-full bg-indigo-500 animate-bounce" style={{ animationDelay: '0.32s' }}></span>
+              </span>
             </span>
           )}
         </div>
