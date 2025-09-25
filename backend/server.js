@@ -1,6 +1,18 @@
 import express from 'express';
 import http from 'http';
 import { Server } from 'socket.io';
+import mongoose from 'mongoose';
+import RoomMessage from './models/RoomMessage.js';
+import PrivateMessage from './models/PrivateMessage.js';
+
+const DB_URI = 'mongodb://localhost:27017/chat-app';
+mongoose.connect(DB_URI)
+  .then(() => {
+    console.log('Connected to MongoDB');
+  })
+  .catch((err) => {
+    console.error('Error connecting to MongoDB:', err);
+});
 
 const app = express();
 const server = http.createServer(app);
@@ -37,21 +49,70 @@ function getSocketIdByUsername(userName) {
   return user ? user.socketID : null;
 }
 
-function getRoomMessages(room) {
-  return roomMessages[room] || [];
+// function getRoomMessages(room) {
+//   return roomMessages[room] || [];
+// }
+async function getRoomMessages(room) {
+  try {
+    const messages = await RoomMessage.find({ room }).sort({ time: 1 });
+    return messages;
+  } catch (err) {
+    console.error('Error fetching room messages:', err);
+    return [];
+  }
 }
 
-function getPrivateMessages(userA, userB) {
-  const messages = userDMs[userA]?.conversations?.[userB] || [];
-  return messages;
+// function getPrivateMessages(userA, userB) {
+//   const messages = userDMs[userA]?.conversations?.[userB] || [];
+//   return messages;
+// }
+async function getPrivateMessages(userA, userB) {
+  try {
+    const messages = await PrivateMessage.find({
+      $or: [
+        { sender: userA, recipient: userB },
+        { sender: userB, recipient: userA },
+      ],
+    }).sort({ time: 1 });
+    return messages;
+  } catch (err) {
+    console.error('Error fetching private messages:', err);
+    return [];
+  }
+}
+async function savePrivateMessage(sender, recipient, message) {
+  try {
+    const newMessage = new PrivateMessage({
+      sender: sender.userName,
+      recipient,
+      text: message.text.trim(),
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    });
+    await newMessage.save();
+  } catch (err) {
+    console.error('Error saving private message:', err);
+  }
 }
 
 // Save a new message to the room
-function saveRoomMessage(room, message) {
-  if (!roomMessages[room]) {
-    roomMessages[room] = [];
+// function saveRoomMessage(room, message) {
+//   if (!roomMessages[room]) {
+//     roomMessages[room] = [];
+//   }
+//   roomMessages[room].push(message);
+// }
+async function saveRoomMessage(room, message) {
+  try {
+    const newMessage = new RoomMessage({
+      room: message.room,
+      userName: message.userName,
+      text: message.text,
+      time: message.time,
+    });
+    await newMessage.save();
+  } catch (err) {
+    console.error('Error saving room message:', err);
   }
-  roomMessages[room].push(message);
 }
 
 // Get unread count for a user from another user
@@ -103,12 +164,12 @@ io.on('connection', socket => {
   // Join "general" by default
   socket.join('general');
 
-  socket.on('getRoomMessages', (room, cb) => {
-    const messages = getRoomMessages(room) || [];
+  socket.on('getRoomMessages', async (room, cb) => {
+    const messages = await getRoomMessages(room) || [];
     cb && cb(messages);
   });
 
-  socket.on('newUser', ({ userName }, cb) => {
+  socket.on('newUser', async ({ userName }, cb) => {
     const taken = users.some(u => u.userName === userName);
     if (taken) {
       cb({ success: false, message: 'Username is already taken.' });
@@ -133,11 +194,13 @@ io.on('connection', socket => {
     if (isPublicRoom('general')) {
       io.to('general').emit('notification', `${userName} joined the general room`);
     }
-    
+    const previousMessages = await getRoomMessages('general');
+    socket.emit('roomMessages', previousMessages);
+
     cb({ success: true, room: 'general' });
   });
 
-  socket.on('joinRoom', (newRoom, cb) => {
+  socket.on('joinRoom', async (newRoom, cb) => {
     const user = users.find(u => u.socketID === socket.id);
     if (!user) return;
 
@@ -164,7 +227,7 @@ io.on('connection', socket => {
     user.currentRoom = newRoom;
     io.emit('allUsers', getAllUsers());
 
-    const previousMessages = getRoomMessages(newRoom) || [];
+    const previousMessages = await getRoomMessages(newRoom);
     socket.emit('roomMessages', previousMessages);
 
     // Send notifications only for public rooms
@@ -178,7 +241,7 @@ io.on('connection', socket => {
     cb && cb({ success: true, room: newRoom });
   });
 
-  socket.on('privateMessage', ({ recipient, message }, cb) => {
+  socket.on('privateMessage', async ({ recipient, message }, cb) => {
     const sender = users.find(u => u.socketID === socket.id);
     if (!sender) return;
 
@@ -198,7 +261,8 @@ io.on('connection', socket => {
       private: true,
     };
 
-    saveRoomMessage(pmRoom, msg);
+    // saveRoomMessage(pmRoom, msg);
+    await savePrivateMessage(sender, recipient, msg);
 
     // Store message for sender
     if (!userDMs[sender.userName]) userDMs[sender.userName] = { conversations: {} };
@@ -229,7 +293,7 @@ io.on('connection', socket => {
     cb && cb({ success: true });
   });
 
-  socket.on('getPrivateMessages', ({ withUser }, cb) => {
+  socket.on('getPrivateMessages', async ({ withUser }, cb) => {
     const user = users.find(u => u.socketID === socket.id);
     if (!user) return;
     
@@ -242,12 +306,40 @@ io.on('connection', socket => {
       count: 0
     });
     
-    const convos = userDMs[user.userName]?.conversations || {};
-    const messages = convos[withUser] || [];
+    // const convos = userDMs[user.userName]?.conversations || {};
+    // const messages = convos[withUser] || [];
+    const messages = await getPrivateMessages(user.userName, withUser);
     cb && cb(messages);
   });
 
-  socket.on('chatMessage', ({ room, message }) => {
+  socket.on('clearPrivateMessages', async ({ withUser }, cb) => {
+    const user = users.find(u => u.socketID === socket.id);
+    if (!user) return;
+
+    await PrivateMessage.deleteMany({
+      $or: [
+        { sender: user.userName, recipient: withUser },
+        { sender: withUser, recipient: user.userName }
+      ]
+    });
+
+    if (userDMs[user.userName]?.conversations?.[withUser]) {
+      userDMs[user.userName].conversations[withUser] = [];
+    }
+    if (userDMs[withUser]?.conversations?.[user.userName]) {
+      userDMs[withUser].conversations[user.userName] = [];
+    }
+
+    const recipientSocketID = getSocketIdByUsername(withUser);
+    if (recipientSocketID) {
+      io.to(recipientSocketID).emit('privateMessagesCleared', { fromUser: user.userName });
+    }
+    socket.emit('privateMessagesCleared', { fromUser: user.userName });
+
+    cb && cb({ success: true });
+  });
+
+  socket.on('chatMessage', async ({ room, message }) => {
     const user = users.find(u => u.socketID === socket.id);
     if (!user || user.currentRoom !== room) return;
     const msg = {
@@ -257,7 +349,8 @@ io.on('connection', socket => {
       room,
       private: false
     };
-    saveRoomMessage(room, msg);
+    // saveRoomMessage(room, msg);
+    await saveRoomMessage(room, msg);
     io.to(room).emit('chatMessage', msg);
   });
 

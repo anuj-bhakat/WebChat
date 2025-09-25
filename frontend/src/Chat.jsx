@@ -38,14 +38,20 @@ function Chat() {
 
     socket.on('chatMessage', msg => {
       if (!msg.private && msg.room === currentRoom) {
-        setMessages(prev => [...prev, msg]);
+        setMessages(prev => Array.isArray(prev) ? [...prev, msg] : [msg])
       }
     });
 
     socket.on('privateMessage', msg => {
       const pmRoom = getPrivateRoomName(username, privateRecipient);
       if (msg.room === pmRoom) {
-        setMessages(prev => [...prev, msg]);
+        // setMessages(prev => Array.isArray(prev) ? [...prev, msg] : [msg])
+        const formattedMsg = {
+          ...msg,
+          userName: msg.sender || msg.userName,
+          private: true,
+        };
+        setMessages(prev => Array.isArray(prev) ? [...prev, formattedMsg] : [formattedMsg]);
       }
     });
 
@@ -105,19 +111,32 @@ function Chat() {
   useEffect(() => {
     if (!username || !currentRoom) return;
 
-    // socket.emit('joinRoom', currentRoom, (res) => {
-    //   if (res.success) {
-    //     socket.emit('getRoomMessages', currentRoom, (msgs) => {
-    //       setMessages(msgs || []);
-    //     });
-    //   } else {
-    //     console.error('Failed to join room on initial load:', currentRoom);
-    //   }
-    // });
-    socket.emit('getRoomMessages', currentRoom, (msgs) => {
-      setMessages(msgs || []);
+    if (currentRoom.startsWith('pm:') && privateRecipient) {
+      socket.emit('getPrivateMessages', { withUser: privateRecipient }, (msgs) => {
+        const formattedMessages = (msgs || []).map(msg => ({
+          userName: msg.sender,
+          text: msg.text,
+          time: msg.time,
+          private: true,
+        }));
+        setMessages(formattedMessages);
+      });
+    } else {
+      socket.emit('getRoomMessages', currentRoom, (msgs) => {
+        setMessages(msgs || []);
+      });
+    }
+
+    socket.on('privateMessagesCleared', ({ fromUser }) => {
+    if (privateRecipient && fromUser === privateRecipient) {
+      setMessages([]);
+      // Optionally, show a notification: setNotification('Private chat cleared');
+    }
     });
-  }, [username, currentRoom]);
+    return () => {
+      socket.off('privateMessagesCleared');
+    };
+  }, [username, currentRoom, privateRecipient]);
 
   const handleUsernameSubmit = (e) => {
     e.preventDefault();
@@ -216,7 +235,15 @@ function Chat() {
         setMessages([]);
 
         socket.emit('getPrivateMessages', { withUser: userName }, (msgs) => {
-          setMessages(msgs || []);
+          // console.log('Private messages loaded:', msgs);
+          // setMessages(msgs || []);
+          const formattedMessages = (msgs || []).map(msg => ({
+            userName: msg.sender,
+            text: msg.text,
+            time: msg.time,
+            private: true,
+          }));
+          setMessages(formattedMessages);
         });
       } else {
         console.error('Failed to join DM room:', pmRoom);
@@ -371,6 +398,7 @@ function Chat() {
                       DM
                     </button>
                   )}
+                  
                 </div>
               </li>
             );
@@ -409,6 +437,20 @@ function Chat() {
                 </div>
               )
             }
+            {privateRecipient && (
+              <button
+                className="bg-pink-500 cursor-pointer text-white px-6 py-2 rounded-xl mt-4 ml-10 shadow-lg hover:bg-pink-700 font-semibold"
+                onClick={() => {
+                  if (window.confirm(`Clear all messages with ${privateRecipient}?`)) {
+                    socket.emit('clearPrivateMessages', { withUser: privateRecipient }, (res) => {
+                      if (res && res.success) setMessages([]);
+                    });
+                  }
+                }}
+              >
+                Clear Chat
+              </button>
+            )}
           </div>
         </header>
 
@@ -423,7 +465,7 @@ function Chat() {
           style={{ scrollBehavior: 'smooth' }}
         >
           <div className="mx-auto flex flex-col gap-6 w-full px-4">
-            {messages.map((msg, i) => {
+            {Array.isArray(messages) && messages.map((msg, i) => {
               const isOwn = msg.userName === username;
               return (
                 <div
