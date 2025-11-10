@@ -5,7 +5,6 @@ import mongoose from 'mongoose';
 import dotenv from 'dotenv';
 import RoomMessage from './models/RoomMessage.js';
 import PrivateMessage from './models/PrivateMessage.js';
-import dotenv from 'dotenv';
 
 dotenv.config();
 
