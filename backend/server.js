@@ -8,7 +8,7 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-const DB_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/chat-app';
+const DB_URI = process.env.DB_URI || 'mongodb://localhost:27017/chat-app';
 mongoose.connect(DB_URI)
   .then(() => {
     console.log('Connected to MongoDB');
