@@ -4,8 +4,11 @@ import { Server } from 'socket.io';
 import mongoose from 'mongoose';
 import RoomMessage from './models/RoomMessage.js';
 import PrivateMessage from './models/PrivateMessage.js';
+import dotenv from 'dotenv';
 
-const DB_URI = 'mongodb://localhost:27017/chat-app';
+dotenv.config();
+
+const DB_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/chat-app';
 mongoose.connect(DB_URI)
   .then(() => {
     console.log('Connected to MongoDB');

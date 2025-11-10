@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
 
-const socket = io('http://localhost:3000');
+const SOCKET_URL=import.meta.env.VITE_SOCKET_URL || "http://localhost:3000";
+const socket = io(SOCKET_URL);
 
 function getPrivateRoomName(a, b) {
   return `pm:${[a, b].sort().join(',')}`;
