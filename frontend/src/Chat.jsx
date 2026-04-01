@@ -16,6 +16,8 @@ function Chat() {
   const [currentRoom, setCurrentRoom] = useState('general');
   const [messageInput, setMessageInput] = useState('');
   const [messages, setMessages] = useState([]);
+  const [isJoining, setIsJoining] = useState(false);
+  const [showWakeMessage, setShowWakeMessage] = useState(false);
   const [notification, setNotification] = useState('');
   const [usernameError, setUsernameError] = useState('');
   const [typingUsers, setTypingUsers] = useState([]);
@@ -142,7 +144,17 @@ function Chat() {
   const handleUsernameSubmit = (e) => {
     e.preventDefault();
     if (!usernameInput.trim()) return;
+    setIsJoining(true);
+    setShowWakeMessage(false);
+    
+    const wakeTimeout = setTimeout(() => {
+      setShowWakeMessage(true);
+    }, 10000);
+
     socket.emit('newUser', { userName: usernameInput.trim() }, (res) => {
+      clearTimeout(wakeTimeout);
+      setIsJoining(false);
+      setShowWakeMessage(false);
       if (res.success) {
         setUsername(usernameInput.trim());
         setCurrentRoom(res.room || 'general');
@@ -260,20 +272,37 @@ function Chat() {
           <h2 className="text-4xl font-extrabold text-indigo-700 mb-4 tracking-tight">Welcome to Chat</h2>
           {usernameError && <div className="text-red-600 text-sm font-semibold mb-1">{usernameError}</div>}
           <input
-            className="border-2 border-indigo-300 focus:border-indigo-600 rounded-xl px-5 py-4 w-full text-lg font-semibold text-gray-700 placeholder-gray-400 focus:outline-none transition-shadow shadow-sm focus:shadow-md"
+            className={`border-2 border-indigo-300 focus:border-indigo-600 rounded-xl px-5 py-4 w-full text-lg font-semibold text-gray-700 placeholder-gray-400 focus:outline-none transition-shadow shadow-sm focus:shadow-md ${isJoining ? 'opacity-70 cursor-not-allowed bg-gray-100' : ''}`}
             placeholder="Enter your username"
             value={usernameInput}
             onChange={e => setUsernameInput(e.target.value)}
             required
             autoFocus
             spellCheck={false}
+            disabled={isJoining}
           />
           <button
             type="submit"
-            className="bg-indigo-600 hover:bg-indigo-700 transition-colors text-white text-lg font-semibold rounded-xl px-8 py-4 w-full shadow-lg shadow-indigo-400/50"
+            disabled={isJoining}
+            className={`bg-indigo-600 transition-colors text-white text-lg font-semibold rounded-xl px-8 py-4 w-full shadow-lg ${isJoining ? 'opacity-70 cursor-not-allowed' : 'hover:bg-indigo-700 shadow-indigo-400/50'}`}
           >
-            Join Chat
+            {isJoining ? (
+              <span className="flex items-center justify-center gap-3">
+                <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Joining...
+              </span>
+            ) : (
+              'Join Chat'
+            )}
           </button>
+          {showWakeMessage && (
+            <div className="text-amber-500 text-sm font-semibold -mt-4 animate-pulse text-center">
+              Waking up server, may take a minute...
+            </div>
+          )}
         </form>
       </div>
     );
@@ -440,7 +469,7 @@ function Chat() {
             }
             {privateRecipient && (
               <button
-                className="bg-pink-500 cursor-pointer text-white px-6 py-2 rounded-xl mt-4 ml-10 shadow-lg hover:bg-pink-700 font-semibold"
+                className="bg-pink-500 cursor-pointer text-white flex-shrink-0 px-6 py-2 rounded-xl sm:mt-0 shadow-lg hover:bg-pink-700 font-semibold"
                 onClick={() => {
                   if (window.confirm(`Clear all messages with ${privateRecipient}?`)) {
                     socket.emit('clearPrivateMessages', { withUser: privateRecipient }, (res) => {
@@ -452,6 +481,13 @@ function Chat() {
                 Clear Chat
               </button>
             )}
+            <button
+              onClick={() => window.location.reload()}
+              className="bg-red-500 cursor-pointer hover:bg-red-600 flex-shrink-0 text-white px-6 py-2 rounded-xl shadow-lg font-semibold transition-colors sm:mt-0 sm:ml-2"
+              title="Logout from chat"
+            >
+              Logout
+            </button>
           </div>
         </header>
 
